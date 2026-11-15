@@ -70,3 +70,4 @@ venv/
 frontend/vite.config.js.timestamp-*
 frontend/vite.config.ts.timestamp-*
 /.openidea/
+/.agent-workflow/
