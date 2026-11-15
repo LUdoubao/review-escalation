@@ -1,0 +1,23 @@
+{
+  "extensions": ["java-backend", "vue-frontend", "contract"],
+  "commands": {
+    "backend-test": ["mvn", "-f", "backend/pom.xml", "test"],
+    "frontend-build": ["npm", "--prefix", "frontend", "run", "build"]
+  },
+  "ignored_paths": [
+    "frontend/dist/",
+    "frontend/node_modules/",
+    "backend/target/"
+  ],
+  "contract_surface": {
+    "backend": [
+      "backend/src/main/java/com/example/baseline/controller/",
+      "backend/src/main/java/com/example/baseline/dto/"
+    ],
+    "frontend": [
+      "frontend/src/api/",
+      "frontend/src/components/"
+    ]
+  },
+  "risk_high": []
+}

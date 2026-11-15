@@ -1,0 +1,8 @@
+# 基线服务配置：仅声明端口与应用名，不引入数据库、缓存或外部中间件。
+# 前端 Vite dev server 通过 /api 代理到该端口；修改此处端口时必须同步 frontend/vite.config.js。
+server:
+  port: 8080
+
+spring:
+  application:
+    name: review-escalation-backend
