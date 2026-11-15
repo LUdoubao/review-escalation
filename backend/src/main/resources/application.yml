@@ -1,8 +1,44 @@
-# 基线服务配置：仅声明端口与应用名，不引入数据库、缓存或外部中间件。
-# 前端 Vite dev server 通过 /api 代理到该端口；修改此处端口时必须同步 frontend/vite.config.js。
+# 服务配置：端口与应用名保持不变，新增任务看板模块所需的 MySQL 数据源与 ORM 配置。
+# 前端 Vite dev server 通过 /api 代理到该端口；修改此处端口时必须同步 frontend/vite.config.js
+# 与 CorsConfig.DEV_ORIGIN，三处保持一致。
 server:
   port: 8080
 
 spring:
   application:
     name: review-escalation-backend
+
+  # 任务看板的持久化数据源。库与表由 schema.sql / data.sql 在启动时幂等初始化，
+  # 因此首次启动前只需保证 MySQL 实例可用且库已存在（review_escalation）。
+  # 凭据不写入仓库：用户名与口令由运行环境提供（DB_USERNAME / DB_PASSWORD），
+  # 配置内只保留占位符，避免口令随仓库、构建产物与工作树副本分发。
+  # 口令占位符刻意不设默认值：缺失时启动阶段即因无法解析占位符而失败，
+  # 不会出现「口令为空却连上库」这种看起来正常、实际连错账号的情况。
+  datasource:
+    url: jdbc:mysql://localhost:3306/review_escalation?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  # 建表与演示数据均在应用启动阶段执行，脚本本身幂等（IF NOT EXISTS / INSERT IGNORE），
+  # 重复启动不会重复建表或放大演示数据。continue-on-error 关闭，让脚本错误在启动期显式暴露。
+  sql:
+    init:
+      mode: always
+      encoding: UTF-8
+      schema-locations: classpath:schema.sql
+      data-locations: classpath:data.sql
+      continue-on-error: false
+
+mybatis-plus:
+  # 手写 SQL 统一放在 resources/mapper 下，接口方法名与 XML 的 id 一一对应。
+  mapper-locations: classpath*:/mapper/**/*.xml
+  configuration:
+    # 库表使用下划线命名，实体使用驼峰命名，开启自动映射后无需逐列写 resultMap。
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      # 逻辑删除：查询自动追加 deleted = 0，删除动作改写为 UPDATE，保证演示数据可回溯。
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0

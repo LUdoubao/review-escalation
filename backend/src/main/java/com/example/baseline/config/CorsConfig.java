@@ -5,7 +5,7 @@ import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
- * 开发态跨域配置，允许 Vite dev server 直连后端时读取 /api 下的响应。
+ * 开发态跨域配置，允许 Vite dev server 直连后端时读取与写入 /api 下的资源。
  *
  * <p>领域：本地联调基础设施；关系：由 Spring MVC 在启动时收集，与具体控制器解耦。
  * 场景：默认走 Vite 代理（同源，不触发 CORS）；仅在把前端 baseURL 改为后端绝对地址时生效。
@@ -18,15 +18,18 @@ public class CorsConfig implements WebMvcConfigurer {
     private static final String DEV_ORIGIN = "http://localhost:5173";
 
     /**
-     * 仅对 /api 前缀放行指定开发源与只读方法，避免把整个应用暴露为可跨域访问。
+     * 仅对 /api 前缀放行指定开发源与所需方法，避免把整个应用暴露为可跨域访问。
+     *
+     * <p>任务看板引入写接口后，方法集合需覆盖 POST（新建）、PATCH（编辑与移动）、
+     * DELETE（删除）；OPTIONS 供浏览器预检使用。方法按需放行，不使用通配符，
+     * 以免后续新增写接口被静默放行。</p>
      *
      * @param registry Spring MVC 提供的跨域映射注册器，由容器传入
      */
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        // 只放行 GET/OPTIONS：基线没有写操作，缩小方法集合可防止后续新增写接口时被默默放行。
         registry.addMapping("/api/**")
                 .allowedOrigins(DEV_ORIGIN)
-                .allowedMethods("GET", "OPTIONS");
+                .allowedMethods("GET", "POST", "PATCH", "DELETE", "OPTIONS");
     }
 }

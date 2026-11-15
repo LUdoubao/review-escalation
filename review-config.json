@@ -12,11 +12,13 @@
   "contract_surface": {
     "backend": [
       "backend/src/main/java/com/example/baseline/controller/",
-      "backend/src/main/java/com/example/baseline/dto/"
+      "backend/src/main/java/com/example/baseline/dto/",
+      "backend/src/main/java/com/example/baseline/domain/"
     ],
     "frontend": [
       "frontend/src/api/",
-      "frontend/src/components/"
+      "frontend/src/components/",
+      "frontend/src/stores/"
     ]
   },
   "risk_high": []

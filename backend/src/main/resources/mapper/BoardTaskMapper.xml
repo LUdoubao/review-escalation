@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  任务看板的数据访问层。所有涉及看板表的 SQL 收敛在此文件，service 只负责业务判断。
+  逻辑删除条件在各语句中显式声明（deleted = 0），不用拦截器隐式改写，便于逐条核对条件集合。
+
+  条件复用约定：列表查询、计数查询、看板查询必须共用同一个 listFilters 片段，
+  任何一侧单独另写条件都会让「总数」与「数据页」来自不同口径，因此三处一律 include。
+-->
+<mapper namespace="com.example.baseline.mapper.BoardTaskMapper">
+
+    <!-- 唯一的筛选条件片段：状态、优先级、负责人、关键字四类条件按需拼接。 -->
+    <sql id="listFilters">
+        <if test="q.status != null and q.status != ''">
+            AND status = #{q.status}
+        </if>
+        <if test="q.priority != null and q.priority != ''">
+            AND priority = #{q.priority}
+        </if>
+        <if test="q.assignee != null and q.assignee != ''">
+            AND assignee = #{q.assignee}
+        </if>
+        <if test="q.keyword != null and q.keyword != ''">
+            AND (title LIKE CONCAT('%', #{q.keyword}, '%') OR tag LIKE CONCAT('%', #{q.keyword}, '%'))
+        </if>
+    </sql>
+
+    <!-- 分页列表：按状态列顺序、列内序号、主键升序返回一页数据。
+         排序中的状态顺序与前端列渲染顺序保持一致，避免同一任务在不同视图里位置漂移。 -->
+    <select id="selectPageList" resultType="com.example.baseline.domain.BoardTask">
+        SELECT *
+        FROM board_task
+        WHERE deleted = 0
+        <include refid="listFilters"/>
+        ORDER BY FIELD(status, 'TODO', 'DOING', 'REVIEW', 'DONE'), sort_order ASC, id ASC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- 分页总数：与列表查询共用 listFilters，保证总数与数据页来自同一筛选口径。 -->
+    <select id="countByQuery" resultType="long">
+        SELECT COUNT(*)
+        FROM board_task
+        WHERE deleted = 0
+        <include refid="listFilters"/>
+    </select>
+
+    <!-- 看板候选集：按状态分区编号后只取每列前 N 条，避免把整表读进内存再截断。
+         窗口函数在数据库侧完成「每列前 N 条」，传输量与结果集都收敛到 列数 × N。 -->
+    <select id="selectBoardPage" resultType="com.example.baseline.domain.BoardTask">
+        SELECT *
+        FROM (
+            SELECT b.*,
+                   ROW_NUMBER() OVER (PARTITION BY b.status ORDER BY b.sort_order ASC, b.id ASC) AS row_num
+            FROM board_task b
+            WHERE b.deleted = 0
+            <include refid="listFilters"/>
+        ) ranked
+        WHERE ranked.row_num &lt;= #{limit}
+        ORDER BY FIELD(ranked.status, 'TODO', 'DOING', 'REVIEW', 'DONE'), ranked.sort_order ASC, ranked.id ASC
+    </select>
+
+    <!-- 各状态的命中总数：与看板候选集共用 listFilters，供列头「共 N 条」使用。 -->
+    <select id="selectColumnTotals" resultType="map">
+        SELECT status AS status, COUNT(*) AS total
+        FROM board_task
+        WHERE deleted = 0
+        <include refid="listFilters"/>
+        GROUP BY status
+    </select>
+
+    <!-- 汇总用的总数与分状态计数。两处分开查询，避免在应用侧遍历全表统计。 -->
+    <select id="countAll" resultType="long">
+        SELECT COUNT(*) FROM board_task WHERE deleted = 0
+    </select>
+
+    <select id="countByStatus" resultType="long">
+        SELECT COUNT(*) FROM board_task WHERE deleted = 0 AND status = #{status}
+    </select>
+
+    <!-- 逾期计数：在数据库侧按「未完成 + 已过截止日」聚合，不再把全表行拉回应用内存。
+         日期由 service 以业务时区算出后传入，避免数据库与会话时区不同导致跨天错判。 -->
+    <select id="countOverdue" resultType="long">
+        SELECT COUNT(*)
+        FROM board_task
+        WHERE deleted = 0
+          AND status &lt;&gt; 'DONE'
+          AND due_date IS NOT NULL
+          AND due_date &lt; #{today}
+    </select>
+
+    <!-- 负责人候选：去重并按名称排序，空值不参与下拉。 -->
+    <select id="selectAssignees" resultType="string">
+        SELECT DISTINCT assignee
+        FROM board_task
+        WHERE deleted = 0 AND assignee IS NOT NULL AND assignee &lt;&gt; ''
+        ORDER BY assignee ASC
+    </select>
+
+    <!-- 列内最大序号：新建任务追加到列尾时使用，空列返回 NULL 由 service 兜底为 -1 起算。 -->
+    <select id="selectMaxSortOrder" resultType="java.lang.Integer">
+        SELECT MAX(sort_order) FROM board_task WHERE deleted = 0 AND status = #{status}
+    </select>
+
+    <!-- 取列内主键并加行锁：新建任务前先锁住该列，使「读最大序号 + 写入」在并发下串行，
+         否则两个并发新建会读到同一个最大值并把卡片写进同一个序号。 -->
+    <select id="lockColumn" resultType="java.lang.Long">
+        SELECT id FROM board_task WHERE deleted = 0 AND status = #{status} ORDER BY id ASC FOR UPDATE
+    </select>
+
+    <!-- 按状态取整列并加行锁，移动任务时用于计算插入位置与重排序号。
+         一次跨列移动会锁「源列 + 目标列」两列，调用方按状态枚举顺序依次加锁
+         （见 TaskBoardService#lockColumns），使任意两个方向的并发移动取锁顺序一致。 -->
+    <select id="selectByStatusForUpdate" resultType="com.example.baseline.domain.BoardTask">
+        SELECT *
+        FROM board_task
+        WHERE deleted = 0 AND status = #{status}
+        ORDER BY sort_order ASC, id ASC
+        FOR UPDATE
+    </select>
+
+    <!-- 批量改写列内序号：一次语句写完一整列的 0..n-1 序号，替代逐条 UPDATE。
+         只改序号与更新时间，不动 version —— 相邻卡片的位置变化不应让持有旧版本的客户端在编辑内容时误报冲突。 -->
+    <update id="updateSortOrders">
+        UPDATE board_task
+        SET sort_order = CASE id
+            <foreach collection="items" item="item">
+                WHEN #{item.id} THEN #{item.sortOrder}
+            </foreach>
+            END,
+            updated_at = #{updatedAt}
+        WHERE deleted = 0
+          AND id IN
+          <foreach collection="items" item="item" open="(" separator="," close=")">
+              #{item.id}
+          </foreach>
+    </update>
+</mapper>
