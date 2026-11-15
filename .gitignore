@@ -62,3 +62,4 @@ venv/
 
 # WorkBuddy 项目元数据
 .workbuddy/
+/.openidea/
